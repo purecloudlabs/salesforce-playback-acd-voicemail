@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<LightningComponentBundle xmlns="http://soap.sforce.com/2006/04/metadata">
+    <apiVersion>58.0</apiVersion>
+    <isExposed>true</isExposed>
+    <masterLabel>ACD Voicemail Viewer</masterLabel>
+    <description>Component to retrieve and play Genesys Cloud voicemail messages</description>
+    <targets>
+        <target>lightning__RecordPage</target>
+        <target>lightning__AppPage</target>
+        <target>lightning__HomePage</target>
+    </targets>
+    <targetConfigs>
+        <targetConfig targets="lightning__RecordPage">
+            <objects>
+                <object>VoiceCall</object>
+            </objects>
+            <property name="genesysCloudRegion" type="String" label="Genesys Cloud Region" default="mypurecloud.com" description="The region of your Genesys Cloud org" datasource="mypurecloud.com,usw2.pure.cloud,cac1.pure.cloud,euw2.pure.cloud,mypurecloud.ie,mypurecloud.de,mypurecloud.com.au,apne2.pure.cloud,mypurecloud.jp,mypurecloud.co.uk,use2.us-gov-pure.cloud"/>
+            <property name="genesysCloudClientId" type="String" label="Genesys Cloud Client ID" required="true" default="oauth client_id" description="The OAuth client ID for Genesys Cloud API access"/>
+        </targetConfig>
+    </targetConfigs>
+</LightningComponentBundle>

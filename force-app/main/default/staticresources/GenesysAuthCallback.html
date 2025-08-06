@@ -1,0 +1,41 @@
+<apex:page showHeader="false" sidebar="false" standardStylesheets="false">
+    <html>
+        <head>
+            <title>Genesys Cloud Authentication</title>
+            <script type="text/javascript">
+                window.onload = function() {
+                    // Parse the URL hash fragment
+                    const hash = window.location.hash.substring(1);
+                    const params = new URLSearchParams(hash);
+                    
+                    // Get the access token and expiration
+                    const accessToken = params.get('access_token');
+                    const expiresIn = params.get('expires_in');
+                    
+                    if (accessToken) {
+                        // Send message to parent window
+                        window.opener.postMessage({
+                            type: 'GENESYS_AUTH_CALLBACK',
+                            accessToken: accessToken,
+                            expiresIn: expiresIn
+                        }, window.location.origin);
+                        
+                        // Close this window
+                        setTimeout(function() {
+                            window.close();
+                        }, 500);
+                    } else {
+                        document.getElementById('message').innerHTML = 'Authentication failed. No access token received.';
+                    }
+                };
+            </script>
+        </head>
+        <body>
+            <div style="text-align: center; padding: 20px; font-family: Arial, sans-serif;">
+                <h2>Genesys Cloud Authentication</h2>
+                <p>Authentication complete. This window will close automatically.</p>
+                <p id="message"></p>
+            </div>
+        </body>
+    </html>
+</apex:page>

@@ -1,0 +1,47 @@
+<template>
+    <template if:true={shouldShowCard}>
+    <lightning-card title="ACD Voicemail Player" icon-name="utility:voicemail_drop">
+        <div class="slds-p-horizontal_medium">
+            <!-- Login Button (shown when not authenticated) -->
+            <template if:false={isAuthenticated}>
+                <div class="slds-m-bottom_medium">
+                    <p class="slds-text-body_small slds-m-bottom_x-small">You need to authenticate with Genesys Cloud to use this component.</p>
+                    <lightning-button 
+                        variant="brand" 
+                        label="Login to Genesys Cloud" 
+                        onclick={handleLogin}>
+                    </lightning-button>
+                </div>
+            </template>
+            
+            <!-- Content when authenticated -->
+            <template if:true={isAuthenticated}>
+                <!-- Loading Spinner -->
+                <template if:true={isLoading}>
+                    <lightning-spinner alternative-text="Loading voicemail..." size="small"></lightning-spinner>
+                </template>
+                
+                <!-- Audio Player -->
+                <template if:true={audioUrl}>
+                    <div class="slds-m-top_medium">
+                        <audio controls controlslist="nodownload" class="slds-size_full">
+                            <source src={audioUrl} type="audio/wav">
+                            Your browser does not support the audio element.
+                        </audio>
+                    </div>
+                </template>
+                
+                <!-- Error Message -->
+                <template if:true={errorMessage}>
+                    <div class="slds-m-top_medium">
+                        <div class="slds-notify slds-notify_alert slds-alert_error">
+                            <span class="slds-assistive-text">Error</span>
+                            <h2>{errorMessage}</h2>
+                        </div>
+                    </div>
+                </template>
+            </template>
+        </div>
+    </lightning-card>
+    </template>
+</template>
