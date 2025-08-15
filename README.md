@@ -1,5 +1,7 @@
 # ACD Voicemail Salesforce Deployment Guide
 
+Watch how to setup in Salesforce and see how it works [here](https://www.youtube.com/watch?v=VXic4mlBokM).
+
 ## Table of Contents
 - [Prerequisites](#prerequisites)
 - [Deployment Steps](#deployment-steps)
