@@ -164,14 +164,60 @@ This project includes:
 ### 1. Assign Permission Sets
 Navigate to Setup → Users → Permission Sets and assign relevant permissions to users.
 
-### 2. Configure App Settings
+### 2. Configure ACD Voicemail Component
+After deploying the component, you need to configure the regional and OAuth settings:
+
+#### Step 1: Configure Region and Client ID
+1. Navigate to the Lightning App Builder or the page where you've added the `acdVoicemailViewer` component
+2. Edit the page and select the ACD Voicemail component
+3. In the component properties:
+   - **Set the Region**: Configure the appropriate region for your Genesys environment
+   - **Add Client ID**: Enter your Genesys OAuth Client ID
+
+#### Step 2: Configure OAuth Implicit Grant
+
+**Finding Your Redirect URI:**
+
+1. **Determine Your Org Domain:**
+   - In Salesforce, go to Setup → Company Information
+   - Note your "My Domain" URL (e.g., `mycompany.lightning.force.com`)
+   - Or check the URL in your browser when logged into Salesforce
+
+2. **Construct the Redirect URI:**
+   - **Format**: `https://[your-org-domain]/resource/GenesysAuthCallback`
+   - **Production/Developer Org**: `https://mycompany.lightning.force.com/resource/GenesysAuthCallback`
+   - **Sandbox**: `https://mycompany--sandbox.sandbox.lightning.force.com/resource/GenesysAuthCallback`
+
+3. **Verify the Static Resource Path:**
+   - Go to Setup → Static Resources
+   - Find `GenesysAuthCallback` in the list
+   - Click "View" to confirm the resource exists and note the exact name
+
+4. **Configure in Genesys:**
+   - In your Genesys environment, navigate to your OAuth client configuration
+   - Under **Implicit Grant** settings, add the complete redirect URI
+   - Example: `https://mycompany.lightning.force.com/resource/GenesysAuthCallback`
+
+**Common URI Patterns:**
+- **Production**: `https://[domain].lightning.force.com/resource/GenesysAuthCallback`
+- **Sandbox**: `https://[domain]--[sandbox-name].sandbox.lightning.force.com/resource/GenesysAuthCallback`
+- **Developer Edition**: `https://[domain].develop.lightning.force.com/resource/GenesysAuthCallback`
+
+**Testing the URI:**
+- Copy the redirect URI and paste it in a browser
+- You should see the GenesysAuthCallback.html page load
+- If you get a 404 error, verify the static resource name and org domain
+
+**Note**: These configuration steps are critical for the component to authenticate properly with Genesys services.
+
+### 3. Configure App Settings
 - Go to App Launcher → ACD Voicemail (if application is included)
 - Configure any custom settings or metadata
 
-### 3. Test Components
+### 4. Test Components
 - Navigate to the Lightning App Builder
 - Add the `acdVoicemailViewer` component to a page
-- Test functionality
+- Test functionality and verify OAuth authentication works
 
 ## Troubleshooting
 
