@@ -224,6 +224,11 @@ export default class VoicemailViewer extends LightningElement {
         }, 2000);
     }
 
+    /**
+     * Handles OAuth implicit grant callback (legacy method)
+     * Parses access token from URL hash and stores it
+     * @deprecated Use PKCE flow instead of implicit grant
+     */
     handleAuthCallback() {
         try {
             // Parse the URL hash fragment
@@ -250,6 +255,11 @@ export default class VoicemailViewer extends LightningElement {
         }
     }
 
+    /**
+     * Initiates OAuth PKCE authentication flow
+     * Opens popup window for Genesys Cloud login
+     * @async
+     */
     async handleLogin() {
         const codeVerifier = this.generateCodeVerifier();
         const codeChallenge = await this.generateCodeChallenge(codeVerifier);
@@ -284,6 +294,13 @@ export default class VoicemailViewer extends LightningElement {
     }
 
 
+    // === DATA LOADING METHODS ===
+    
+    /**
+     * Loads voicemails from Genesys Cloud API with pagination
+     * @param {boolean} showLoader - Whether to show loading indicator
+     * @async
+     */
     async loadVoicemails(showLoader = true) {
         try {
             this.isLoading = showLoader;
@@ -377,6 +394,11 @@ export default class VoicemailViewer extends LightningElement {
 
 
 
+    // === PAGINATION METHODS ===
+    
+    /**
+     * Navigates to the next page of voicemails
+     */
     handleNextPage() {
         if (this.hasNextPage) {
             this.currentPage++;
@@ -384,6 +406,9 @@ export default class VoicemailViewer extends LightningElement {
         }
     }
 
+    /**
+     * Navigates to the previous page of voicemails
+     */
     handlePreviousPage() {
         if (this.currentPage > 1) {
             this.currentPage--;
@@ -391,6 +416,12 @@ export default class VoicemailViewer extends LightningElement {
         }
     }
 
+    // === TOKEN MANAGEMENT ===
+    
+    /**
+     * Retrieves and validates stored access token
+     * @returns {string|null} Valid access token or null if expired/missing
+     */
     getAccessToken() {
         const token = localStorage.getItem('genesyscloud_access_token');
         const expiration = localStorage.getItem('genesyscloud_token_expiration');
@@ -411,6 +442,18 @@ export default class VoicemailViewer extends LightningElement {
         return null;
     }
 
+    // === API METHODS ===
+    
+    /**
+     * Makes authenticated API calls to Genesys Cloud
+     * @param {string} endpoint - API endpoint path
+     * @param {string} method - HTTP method (GET, POST, PUT, PATCH, DELETE)
+     * @param {Object|null} body - Request body for POST/PUT/PATCH requests
+     * @param {string} accessToken - Bearer token for authentication
+     * @returns {Promise<Object>} API response data
+     * @throws {Error} API error with status and message
+     * @async
+     */
     async callGenesysCloudApi(endpoint, method, body, accessToken) {
         try {
             const url = `https://api.${this.genesysCloudRegion}` + endpoint;
@@ -440,6 +483,13 @@ export default class VoicemailViewer extends LightningElement {
         }
     }
 
+    // === FORMATTING METHODS ===
+    
+    /**
+     * Formats duration in seconds to MM:SS format
+     * @param {number} durationSeconds - Duration in seconds
+     * @returns {string} Formatted duration string (e.g., "2:30")
+     */
     formatDuration(durationSeconds) {
         if (!durationSeconds) return '0:00';
 
@@ -449,11 +499,23 @@ export default class VoicemailViewer extends LightningElement {
         return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
     }
 
+    /**
+     * Formats ISO date string to localized date/time
+     * @param {string} dateString - ISO date string
+     * @returns {string} Localized date/time string
+     */
     formatDate(dateString) {
         if (!dateString) return '';
         return new Date(dateString).toLocaleString();
     }
 
+    // === VOICEMAIL OPERATIONS ===
+    
+    /**
+     * Marks a voicemail as read in Genesys Cloud
+     * @param {string} voicemailId - Unique voicemail identifier
+     * @async
+     */
     async markVoicemailAsRead(voicemailId) {
         try {
             const accessToken = this.getAccessToken();
@@ -468,6 +530,12 @@ export default class VoicemailViewer extends LightningElement {
         }
     }
 
+    // === UI EVENT HANDLERS ===
+    
+    /**
+     * Toggles the context menu for a voicemail item
+     * @param {Event} event - Click event from menu button
+     */
     handleMenuToggle(event) {
         event.stopPropagation();
         const voicemailId = event.currentTarget.dataset.id;
@@ -478,6 +546,10 @@ export default class VoicemailViewer extends LightningElement {
         }));
     }
 
+    /**
+     * Toggles read/unread status of a voicemail
+     * @param {Event} event - Click event from read toggle button
+     */
     handleToggleRead(event) {
         event.stopPropagation();
         const voicemailId = event.currentTarget.dataset.id;
@@ -491,6 +563,11 @@ export default class VoicemailViewer extends LightningElement {
         this.updateVoicemail(voicemailId, { read: newReadStatus });
     }
 
+    /**
+     * Handles voicemail card click to expand/collapse details
+     * @param {Event} event - Click event from voicemail card
+     * @async
+     */
     async handleCardClick(event) {
         event.stopPropagation();
         const voicemailId = event.currentTarget.dataset.id;
@@ -520,10 +597,18 @@ export default class VoicemailViewer extends LightningElement {
         this.voicemails = [...this.voicemails];
     }
 
+    /**
+     * Prevents event bubbling for menu clicks
+     * @param {Event} event - Click event
+     */
     handleMenuClick(event) {
         event.stopPropagation();
     }
 
+    /**
+     * Generic event propagation stopper
+     * @param {Event} event - Any DOM event
+     */
     handleStopPropagation(event) {
         event.stopPropagation();
     }
@@ -711,10 +796,17 @@ export default class VoicemailViewer extends LightningElement {
         return `${diffDays} day${diffDays > 1 ? 's' : ''} ago`;
     }
 
+    /**
+     * Refreshes the voicemail list
+     */
     handleRefresh() {
         this.loadVoicemails(true);
     }
 
+    /**
+     * Handles audio playback completion, marks voicemail as read
+     * @param {Event} event - Audio ended event
+     */
     handleAudioEnded(event) {
         const voicemailId = event.target.dataset.id;
         const voicemail = this.voicemails.find(vm => vm.id === voicemailId);
@@ -723,6 +815,11 @@ export default class VoicemailViewer extends LightningElement {
         }
     }
 
+    /**
+     * Extracts value between first and second colon in a string
+     * @param {string} inputString - Input string with colon separators
+     * @returns {string|null} Extracted value or null if not found
+     */
     parseValueBetweenColons(inputString) {
         if (!inputString) return null;
 
@@ -735,6 +832,12 @@ export default class VoicemailViewer extends LightningElement {
         return inputString.substring(firstColonIndex + 1, secondColonIndex);
     }
 
+    /**
+     * Generates CSS classes for voicemail cards based on state
+     * @param {boolean} isRead - Whether voicemail is read
+     * @param {boolean} isExpanded - Whether card is expanded
+     * @returns {string} Space-separated CSS class names
+     */
     getCardClass(isRead, isExpanded) {
         const baseClass = 'slds-card slds-m-bottom_small';
         const readClass = isRead ? 'read-card' : 'unread-card';
@@ -742,10 +845,19 @@ export default class VoicemailViewer extends LightningElement {
         return `${baseClass} ${readClass} ${expandedClass}`.trim();
     }
 
+    /**
+     * Calculates number of unread voicemails
+     * @returns {number} Count of unread voicemails
+     */
     get unreadCount() {
         return this.voicemails.filter(vm => !vm.read).length;
     }
 
+    // === UTILITY BAR INTEGRATION ===
+    
+    /**
+     * Updates utility bar badge with current unread count
+     */
     updateUtilityBar() {
         const unread = this.unreadCount;
         this.dispatchEvent(new CustomEvent('voicemailcount', {
@@ -755,6 +867,9 @@ export default class VoicemailViewer extends LightningElement {
         }));
     }
 
+    /**
+     * Clears the utility bar notification badge
+     */
     clearNotificationBadge() {
         this.dispatchEvent(new CustomEvent('voicemailcount', {
             detail: { count: 0 },
@@ -763,6 +878,13 @@ export default class VoicemailViewer extends LightningElement {
         }));
     }
 
+    // === WEBSOCKET REAL-TIME NOTIFICATIONS ===
+    
+    /**
+     * Sets up WebSocket connection for real-time voicemail notifications
+     * Creates notification channel and subscribes to voicemail events
+     * @async
+     */
     async setupWebSocketNotifications() {
         try {
             const accessToken = this.getAccessToken();
@@ -833,12 +955,19 @@ export default class VoicemailViewer extends LightningElement {
         }
     }
 
+    /**
+     * Handles incoming voicemail notification messages
+     * @param {Object} message - WebSocket notification message
+     */
     handleVoicemailNotification(message) {
         setTimeout(() => {
             this.loadVoicemails(false);
         }, 2000);
     }
 
+    /**
+     * Closes WebSocket connection and cleans up resources
+     */
     closeWebSocket() {
         if (this.websocket) {
             this.websocket.close();
@@ -847,6 +976,12 @@ export default class VoicemailViewer extends LightningElement {
         this.isWebSocketConnected = false;
     }
 
+    // === PKCE OAUTH UTILITIES ===
+    
+    /**
+     * Generates cryptographically secure code verifier for PKCE
+     * @returns {string} Base64URL-encoded code verifier
+     */
     generateCodeVerifier() {
         const array = new Uint8Array(32);
         crypto.getRandomValues(array);
@@ -856,6 +991,12 @@ export default class VoicemailViewer extends LightningElement {
             .replace(/=/g, '');
     }
 
+    /**
+     * Generates code challenge from verifier using SHA256
+     * @param {string} verifier - Code verifier string
+     * @returns {Promise<string>} Base64URL-encoded code challenge
+     * @async
+     */
     async generateCodeChallenge(verifier) {
         const encoder = new TextEncoder();
         const data = encoder.encode(verifier);
@@ -866,6 +1007,12 @@ export default class VoicemailViewer extends LightningElement {
             .replace(/=/g, '');
     }
 
+    /**
+     * Exchanges authorization code for access token using PKCE
+     * @param {string} authCode - Authorization code from OAuth callback
+     * @returns {Promise<string|null>} Access token or null on failure
+     * @async
+     */
     async exchangeCodeForToken(authCode) {
         try {
             const codeVerifier = sessionStorage.getItem('pkce_code_verifier');
@@ -907,6 +1054,11 @@ export default class VoicemailViewer extends LightningElement {
         }
     }
 
+    /**
+     * Extracts phone number from caller address string
+     * @param {string} callerAddress - Raw caller address from voicemail
+     * @returns {string|null} Cleaned phone number or null if not found
+     */
     extractPhoneNumber(callerAddress) {
         if (!callerAddress) return null;
         const match = callerAddress.match(/\+?\d[\d\s\-\(\)]+/);
