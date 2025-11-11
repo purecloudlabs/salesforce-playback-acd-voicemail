@@ -45,25 +45,26 @@ export default class AcdVoicemailViewer extends LightningElement {
     
     setupAuthListener() {
         window.addEventListener('message', async (event) => {
-            if (event.origin === window.location.origin) {
-                try {
-                    const data = event.data;
-                    if (data && data.type === 'GENESYS_AUTH_CALLBACK' && data.code) {
-                        const accessToken = await this.exchangeCodeForToken(data.code);
-                        if (accessToken) {
-                            this.isAuthenticated = true;
-                            if (this.VoiceCall && this.VoiceCall.data && this.CallType === 'Callback') {
-                                this.conversationId = this.parseValueBetweenColons(this.VoiceCall.data.fields.VendorCallKey.value);
-                                setTimeout(() => {
-                                    this.handleRetrieveVoicemail();
-                                }, 2000);
-                            }
+            if (event.origin !== window.location.origin) {
+                return;
+            }
+            try {
+                const data = event.data;
+                if (data && data.type === 'GENESYS_AUTH_CALLBACK' && data.code) {
+                    const accessToken = await this.exchangeCodeForToken(data.code);
+                    if (accessToken) {
+                        this.isAuthenticated = true;
+                        if (this.VoiceCall && this.VoiceCall.data && this.CallType === 'Callback') {
+                            this.conversationId = this.parseValueBetweenColons(this.VoiceCall.data.fields.VendorCallKey.value);
+                            setTimeout(() => {
+                                this.handleRetrieveVoicemail();
+                            }, 2000);
                         }
                     }
-                } catch (error) {
-                    console.error('Error processing auth callback message:', error);
-                    this.errorMessage = 'Failed to complete authentication';
                 }
+            } catch (error) {
+                console.error('Error processing auth callback message:', error);
+                this.errorMessage = 'Failed to complete authentication';
             }
         });
     }
