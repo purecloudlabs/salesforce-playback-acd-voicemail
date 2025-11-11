@@ -44,28 +44,20 @@ export default class AcdVoicemailViewer extends LightningElement {
     }
     
     setupAuthListener() {
-        // Create event listener for message from popup
-        window.addEventListener('message', (event) => {
-            // Verify origin for security
+        window.addEventListener('message', async (event) => {
             if (event.origin === window.location.origin) {
                 try {
                     const data = event.data;
-                    if (data && data.type === 'GENESYS_AUTH_CALLBACK' && data.accessToken) {
-                        // Store the token
-                        localStorage.setItem('genesyscloud_access_token', data.accessToken);
-                        
-                        // Calculate and store expiration time
-                        const expirationTime = Date.now() + (parseInt(data.expiresIn, 10) * 1000);
-                        localStorage.setItem('genesyscloud_token_expiration', expirationTime.toString());
-                        
-                        this.isAuthenticated = true;
-                        
-                        // If we have conversation ID, retrieve the voicemail after a delay
-                        if (this.VoiceCall && this.VoiceCall.data && this.CallType === 'Callback') {
-                            this.conversationId = this.parseValueBetweenColons(this.VoiceCall.data.fields.VendorCallKey.value);
-                            setTimeout(() => {
-                                this.handleRetrieveVoicemail();
-                            }, 2000);
+                    if (data && data.type === 'GENESYS_AUTH_CALLBACK' && data.code) {
+                        const accessToken = await this.exchangeCodeForToken(data.code);
+                        if (accessToken) {
+                            this.isAuthenticated = true;
+                            if (this.VoiceCall && this.VoiceCall.data && this.CallType === 'Callback') {
+                                this.conversationId = this.parseValueBetweenColons(this.VoiceCall.data.fields.VendorCallKey.value);
+                                setTimeout(() => {
+                                    this.handleRetrieveVoicemail();
+                                }, 2000);
+                            }
                         }
                     }
                 } catch (error) {
@@ -102,17 +94,21 @@ export default class AcdVoicemailViewer extends LightningElement {
         }
     }
     
-    handleLogin() {
-        // Initiate the implicit grant flow in a popup
+    async handleLogin() {
+        const codeVerifier = this.generateCodeVerifier();
+        const codeChallenge = await this.generateCodeChallenge(codeVerifier);
+        
+        sessionStorage.setItem('pkce_code_verifier', codeVerifier);
+        
         const redirectUri = encodeURIComponent(window.location.origin + '/resource/GenesysAuthCallback');
-        console.log('Redirect URI:', redirectUri);
         const authUrl = `https://login.${this.genesysCloudRegion}/oauth/authorize` +
             `?client_id=${this.genesysCloudClientId}` +
-            `&response_type=token` +
+            `&response_type=code` +
             `&redirect_uri=${redirectUri}` +
-            `&scope=conversations voicemail`;
+            `&scope=conversations voicemail` +
+            `&code_challenge=${codeChallenge}` +
+            `&code_challenge_method=S256`;
         
-        // Open popup window
         const width = 600;
         const height = 700;
         const left = (screen.width/2)-(width/2);
@@ -124,10 +120,8 @@ export default class AcdVoicemailViewer extends LightningElement {
             `width=${width},height=${height},left=${left},top=${top}`
         );
         
-        // Set up message listener for the popup response
         this.setupAuthListener();
         
-        // Fallback if popup is blocked
         if (!authWindow || authWindow.closed || typeof authWindow.closed === 'undefined') {
             this.errorMessage = 'Popup blocked. Please allow popups for this site.';
         }
@@ -271,6 +265,66 @@ export default class AcdVoicemailViewer extends LightningElement {
         return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
     }
     
+    generateCodeVerifier() {
+        const array = new Uint8Array(32);
+        crypto.getRandomValues(array);
+        return btoa(String.fromCharCode.apply(null, array))
+            .replace(/\+/g, '-')
+            .replace(/\//g, '_')
+            .replace(/=/g, '');
+    }
+
+    async generateCodeChallenge(verifier) {
+        const encoder = new TextEncoder();
+        const data = encoder.encode(verifier);
+        const digest = await crypto.subtle.digest('SHA-256', data);
+        return btoa(String.fromCharCode.apply(null, new Uint8Array(digest)))
+            .replace(/\+/g, '-')
+            .replace(/\//g, '_')
+            .replace(/=/g, '');
+    }
+
+    async exchangeCodeForToken(authCode) {
+        try {
+            const codeVerifier = sessionStorage.getItem('pkce_code_verifier');
+            if (!codeVerifier) {
+                throw new Error('Code verifier not found');
+            }
+            
+            const tokenResponse = await fetch(`https://login.${this.genesysCloudRegion}/oauth/token`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded'
+                },
+                body: new URLSearchParams({
+                    grant_type: 'authorization_code',
+                    client_id: this.genesysCloudClientId,
+                    code: authCode,
+                    redirect_uri: window.location.origin + '/resource/GenesysAuthCallback',
+                    code_verifier: codeVerifier
+                })
+            });
+            
+            if (!tokenResponse.ok) {
+                throw new Error('Token exchange failed');
+            }
+            
+            const tokenData = await tokenResponse.json();
+            
+            localStorage.setItem('genesyscloud_access_token', tokenData.access_token);
+            const expirationTime = Date.now() + (tokenData.expires_in * 1000);
+            localStorage.setItem('genesyscloud_token_expiration', expirationTime.toString());
+            
+            sessionStorage.removeItem('pkce_code_verifier');
+            
+            return tokenData.access_token;
+        } catch (error) {
+            console.error('Token exchange error:', error);
+            this.errorMessage = 'Failed to exchange authorization code for token';
+            return null;
+        }
+    }
+
     parseValueBetweenColons(inputString) {
         if (!inputString) return null;
         

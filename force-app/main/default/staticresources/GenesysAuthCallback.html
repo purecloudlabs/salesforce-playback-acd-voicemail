@@ -4,28 +4,26 @@
             <title>Genesys Cloud Authentication</title>
             <script type="text/javascript">
                 window.onload = function() {
-                    // Parse the URL hash fragment
-                    const hash = window.location.hash.substring(1);
-                    const params = new URLSearchParams(hash);
+                    // Parse URL parameters for authorization code
+                    const urlParams = new URLSearchParams(window.location.search);
+                    const authCode = urlParams.get('code');
+                    const error = urlParams.get('error');
                     
-                    // Get the access token and expiration
-                    const accessToken = params.get('access_token');
-                    const expiresIn = params.get('expires_in');
-                    
-                    if (accessToken) {
-                        // Send message to parent window
+                    if (authCode) {
+                        // Send authorization code to parent window
                         window.opener.postMessage({
                             type: 'GENESYS_AUTH_CALLBACK',
-                            accessToken: accessToken,
-                            expiresIn: expiresIn
+                            code: authCode
                         }, window.location.origin);
                         
                         // Close this window
                         setTimeout(function() {
                             window.close();
                         }, 500);
+                    } else if (error) {
+                        document.getElementById('message').innerHTML = 'Authentication failed: ' + error;
                     } else {
-                        document.getElementById('message').innerHTML = 'Authentication failed. No access token received.';
+                        document.getElementById('message').innerHTML = 'Authentication failed. No authorization code received.';
                     }
                 };
             </script>
