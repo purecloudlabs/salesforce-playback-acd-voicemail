@@ -203,7 +203,7 @@ export default class VoicemailViewer extends LightningElement {
                         ...vm,
                         formattedDuration: formatDuration(vm.audioRecordingDurationSeconds),
                         formattedDate: formatDate(vm.createdDate),
-                        relativeTime: getRelativeTime(vm.createdDate),
+                        relativeTime: 'Just now', //getRelativeTime(vm.createdDate),
                         isLoading: existing?.isLoading || false,
                         audioUrl: existing?.audioUrl || null,
                         audioElementId: `audio-${vm.id}`,
