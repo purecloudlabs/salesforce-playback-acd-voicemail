@@ -755,45 +755,25 @@ export default class VoicemailViewer extends LightningElement {
         if (!dateString) return '';
 
         const diffMs = new Date() - new Date(dateString);
-        const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
-        
-        if (diffHours < 1) {
-            return this.formatMinutesAgo(diffMs);
-        }
-        
-        if (diffHours < 24) {
-            return this.formatHoursAgo(diffHours);
-        }
-        
-        return this.formatDaysAgo(Math.floor(diffHours / 24));
-    }
-    
-    /**
-     * Formats time difference in minutes
-     * @param {number} diffMs - Time difference in milliseconds
-     * @returns {string} Formatted minutes string
-     */
-    formatMinutesAgo(diffMs) {
         const diffMinutes = Math.floor(diffMs / (1000 * 60));
-        return diffMinutes < 1 ? 'Just now' : `${diffMinutes} minute${diffMinutes > 1 ? 's' : ''} ago`;
+        const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+        const diffDays = Math.floor(diffHours / 24);
+        
+        if (diffMinutes < 1) return 'Just now';
+        if (diffHours < 1) return this.formatTimeUnit(diffMinutes, 'minute');
+        if (diffHours < 24) return this.formatTimeUnit(diffHours, 'hour');
+        return this.formatTimeUnit(diffDays, 'day');
     }
     
     /**
-     * Formats time difference in hours
-     * @param {number} diffHours - Time difference in hours
-     * @returns {string} Formatted hours string
+     * Formats a time unit with proper pluralization
+     * @param {number} value - Time value
+     * @param {string} unit - Time unit (minute, hour, day)
+     * @returns {string} Formatted time string
      */
-    formatHoursAgo(diffHours) {
-        return `${diffHours} hour${diffHours > 1 ? 's' : ''} ago`;
-    }
-    
-    /**
-     * Formats time difference in days
-     * @param {number} diffDays - Time difference in days
-     * @returns {string} Formatted days string
-     */
-    formatDaysAgo(diffDays) {
-        return `${diffDays} day${diffDays > 1 ? 's' : ''} ago`;
+    formatTimeUnit(value, unit) {
+        const plural = value > 1 ? 's' : '';
+        return `${value} ${unit}${plural} ago`;
     }
 
     /**
