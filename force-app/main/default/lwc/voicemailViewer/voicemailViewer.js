@@ -196,30 +196,7 @@ export default class VoicemailViewer extends LightningElement {
 
             this.voicemails = voicemailsResponse.results
                 .filter(vm => !vm.deleted)
-                .map(vm => {
-                    const existing = this.voicemails.find(v => v.id === vm.id);
-                    const callerAddress = vm.callerAddress || '';
-                    return {
-                        ...vm,
-                        formattedDuration: formatDuration(vm.audioRecordingDurationSeconds),
-                        formattedDate: formatDate(vm.createdDate),
-                        relativeTime: 'Just now', //getRelativeTime(vm.createdDate),
-                        isLoading: existing?.isLoading || false,
-                        audioUrl: existing?.audioUrl || null,
-                        audioElementId: `audio-${vm.id}`,
-                        read: vm.read || false,
-                        cardClass: getCardClass(vm.read, existing?.isExpanded || false),
-                        callerClass: vm.read ? 'read-text' : 'unread-text',
-                        readMenuLabel: vm.read ? 'Mark as Unread' : 'Mark as Read',
-                        note: vm.note || '',
-                        isEditing: existing?.isEditing || false,
-                        isExpanded: existing?.isExpanded || false,
-                        originalNote: vm.note || '',
-                        showMenu: false,
-                        fullCallerAddress: callerAddress.length > 15 ? callerAddress.substring(0, 15) + '...' : callerAddress,
-                        phoneNumber: extractPhoneNumber(callerAddress)
-                    };
-                });
+                .map(vm => this.mapVoicemailData(vm));
 
             this.pageCount = voicemailsResponse.pageCount || 0;
             this.displayCount = this.voicemails.length;
@@ -491,5 +468,32 @@ export default class VoicemailViewer extends LightningElement {
         setTimeout(() => {
             this.loadVoicemails(false);
         }, 2000);
+    }
+
+    mapVoicemailData(vm) {
+        const existing = this.voicemails.find(v => v.id === vm.id);
+        const callerAddress = vm.callerAddress || '';
+        const isExpanded = existing?.isExpanded || false;
+        
+        return {
+            ...vm,
+            formattedDuration: formatDuration(vm.audioRecordingDurationSeconds),
+            formattedDate: formatDate(vm.createdDate),
+            relativeTime: getRelativeTime(vm.createDate),
+            isLoading: existing?.isLoading || false,
+            audioUrl: existing?.audioUrl || null,
+            audioElementId: `audio-${vm.id}`,
+            read: vm.read || false,
+            cardClass: getCardClass(vm.read, isExpanded),
+            callerClass: vm.read ? 'read-text' : 'unread-text',
+            readMenuLabel: vm.read ? 'Mark as Unread' : 'Mark as Read',
+            note: vm.note || '',
+            isEditing: existing?.isEditing || false,
+            isExpanded: isExpanded,
+            originalNote: vm.note || '',
+            showMenu: false,
+            fullCallerAddress: callerAddress.length > 15 ? callerAddress.substring(0, 15) + '...' : callerAddress,
+            phoneNumber: extractPhoneNumber(callerAddress)
+        };
     }
 }
