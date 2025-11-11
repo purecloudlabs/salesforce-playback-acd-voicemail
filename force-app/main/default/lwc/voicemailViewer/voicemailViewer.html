@@ -1,0 +1,211 @@
+<template>
+    <template if:true={shouldShowCard}>
+        <lightning-card title="Voicemail" icon-name="utility:voicemail_drop">
+            <div class="slds-p-horizontal_medium">
+                <!-- Login Button (shown when not authenticated) -->
+                <template if:false={isAuthenticated}>
+                    <div class="slds-m-bottom_medium">
+                        <lightning-button variant="brand" label="Check for Voicemail" onclick={handleLogin}>
+                        </lightning-button>
+                    </div>
+                </template>
+
+                <!-- Content when authenticated -->
+                <template if:true={isAuthenticated}>
+                    <!-- Loading Spinner -->
+                    <template if:true={isLoading}>
+                        <lightning-spinner alternative-text="Loading voicemails..." size="small"></lightning-spinner>
+                    </template>
+
+                    <!-- Voicemail List -->
+                    <template if:true={voicemails}>
+                        <div
+                            class="slds-m-bottom_medium slds-grid slds-grid_align-spread slds-grid_vertical-align-center">
+                            <div class="slds-col">
+                                <h3 class="slds-text-heading_small">Voicemails ({displayCount})</h3>
+                            </div>
+                            <div class="slds-col slds-no-flex">
+                                <div class="slds-grid slds-grid_vertical-align-center slds-gutters_x-small">
+                                    <div class="slds-col">
+                                        <span class="slds-text-body_small slds-text-color_weak">{lastUpdated}</span>
+                                    </div>
+                                    <lightning-button-icon icon-name="utility:refresh" variant="bare"
+                                        alternative-text="Refresh" onclick={handleRefresh} class="slds-p-right_x-small">
+                                    </lightning-button-icon>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- No Voicemails Message -->
+                        <template if:false={hasVoicemail}>
+                            <div class="slds-text-align_center slds-m-vertical_large">
+                                <p class="slds-text-body_regular slds-text-color_weak">You have no voicemails</p>
+                            </div>
+                        </template>
+                        <template for:each={voicemails} for:item="voicemail">
+                            <div key={voicemail.id} class={voicemail.cardClass}>
+                                <div class="slds-card__body slds-card__body_inner" onclick={handleCardClick}
+                                    data-id={voicemail.id} style="cursor: pointer;">
+                                    <div
+                                        class="slds-grid slds-grid_align-spread slds-grid_vertical-align-start slds-m-bottom_small">
+                                        <div
+                                            class="slds-col slds-grid slds-grid_vertical-align-center slds-gutters_x-small">
+                                            <lightning-icon icon-name="utility:voicemail_drop"
+                                                size="x-small"></lightning-icon>
+                                            <template if:false={voicemail.read}>
+                                                <span class="unread-badge">Unread</span>
+                                            </template>
+                                        </div>
+                                        <div
+                                            class="slds-col slds-no-flex slds-grid slds-grid_vertical-align-center slds-gutters_x-small">
+                                            <span
+                                                class="slds-text-body_small slds-text-color_weak">{voicemail.relativeTime}</span>
+                                            <div onclick={handleStopPropagation}>
+                                                <template if:true={voicemail.isLoading}>
+                                                    <lightning-spinner size="small"></lightning-spinner>
+                                                </template>
+                                                <template if:false={voicemail.isLoading}>
+                                                    <div class="menu-wrapper">
+                                                        <button class="three-dots-btn" onclick={handleMenuToggle}
+                                                            data-id={voicemail.id}>
+                                                            <span class="dot"></span>
+                                                            <span class="dot"></span>
+                                                            <span class="dot"></span>
+                                                        </button>
+                                                        <template if:true={voicemail.showMenu}>
+                                                            <div class="dropdown-menu">
+                                                                <div class="menu-item" onclick={handleToggleRead}
+                                                                    data-id={voicemail.id}>
+                                                                    {voicemail.readMenuLabel}
+                                                                </div>
+                                                                <div class="menu-item" onclick={handleDelete}
+                                                                    data-id={voicemail.id}>
+                                                                    Delete Voicemail
+                                                                </div>
+                                                            </div>
+                                                        </template>
+                                                    </div>
+                                                </template>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div
+                                        class="slds-grid slds-grid_vertical-align-center slds-m-bottom_x-small caller-row">
+                                        <template if:true={voicemail.phoneNumber}>
+                                            <div class="slds-col slds-no-flex" onclick={handleStopPropagation}>
+                                                <lightning-click-to-dial
+                                                    value={voicemail.phoneNumber}></lightning-click-to-dial>
+                                            </div>
+                                        </template>
+                                        <div class="slds-col slds-truncate" style="margin-top: -2px">
+                                            <strong class={voicemail.callerClass} style="padding-left: 4px"
+                                                title={voicemail.callerAddress}>({voicemail.callerAddress})</strong>
+                                        </div>
+                                    </div>
+                                    <div class="slds-m-bottom_x-small">
+                                        <span class="slds-text-body_small slds-text-color_weak">Duration:
+                                            {voicemail.formattedDuration}</span>
+                                    </div>
+                                    <div>
+                                        <span
+                                            class="slds-text-body_small slds-text-color_weak">{voicemail.formattedDate}</span>
+                                    </div>
+
+                                    <!-- Expanded Content -->
+                                    <template if:true={voicemail.isExpanded}>
+
+
+                                        <!-- Inline Audio Player -->
+                                        <template if:true={voicemail.audioUrl}>
+                                            <div class="slds-m-top_small">
+                                                <audio id={voicemail.audioElementId} controls controlslist="nodownload"
+                                                    class="slds-size_full" style="height: 40px;" data-id={voicemail.id}
+                                                    onended={handleAudioEnded}>
+                                                    <source src={voicemail.audioUrl} type="audio/wav">
+                                                    Your browser does not support the audio element.
+                                                </audio>
+                                            </div>
+                                        </template>
+
+                                        <!-- Edit Note Section -->
+                                        <template if:true={voicemail.isEditing}>
+                                            <div class="slds-m-top_small" onclick={handleStopPropagation}>
+                                                <lightning-textarea label="Notes"
+                                                    placeholder="Add notes to your voicemail" value={voicemail.note}
+                                                    data-id={voicemail.id} onchange={handleNoteChange}>
+                                                </lightning-textarea>
+                                                <div class="slds-m-top_x-small">
+                                                    <lightning-button variant="brand" label="Save"
+                                                        data-id={voicemail.id} onclick={handleSaveNote}
+                                                        class="slds-m-right_x-small">
+                                                    </lightning-button>
+                                                    <lightning-button variant="neutral" label="Cancel"
+                                                        data-id={voicemail.id} onclick={handleCancelEdit}>
+                                                    </lightning-button>
+                                                </div>
+                                            </div>
+                                        </template>
+
+                                        <!-- Note Display -->
+                                        <template if:false={voicemail.isEditing}>
+                                            <div class="slds-m-top_small">
+                                                <template if:true={voicemail.note}>
+                                                    <div class="slds-text-body_small slds-text-color_weak">Notes:
+                                                        {voicemail.note}
+                                                        <lightning-button variant="base" label="Edit"
+                                                            onclick={handleEditNote} data-id={voicemail.id}
+                                                            class="edit-note-btn"></lightning-button>
+                                                    </div>
+                                                </template>
+                                                <template if:false={voicemail.note}>
+                                                    <div class="slds-text-body_small slds-text-color_weak">This
+                                                        voicemail has no notes.
+                                                        <lightning-button variant="base" label="Edit"
+                                                            onclick={handleEditNote} data-id={voicemail.id}
+                                                            class="edit-note-btn"></lightning-button>
+                                                    </div>
+                                                </template>
+                                            </div>
+                                        </template>
+                                    </template>
+                                </div>
+                            </div>
+                        </template>
+
+                        <!-- Pagination -->
+                        <template if:true={showPagination}>
+                            <div class="slds-grid slds-grid_align-center slds-m-top_medium">
+                                <lightning-button variant="neutral" label="Previous" disabled={hasPreviousPage}
+                                    onclick={handlePreviousPage}>
+                                </lightning-button>
+                                <span class="slds-m-horizontal_small pagination-text">Page {currentPage}</span>
+                                <lightning-button variant="neutral" label="Next" disabled={disableNextPage}
+                                    onclick={handleNextPage}>
+                                </lightning-button>
+                            </div>
+                        </template>
+                    </template>
+
+                    <!-- Error Message -->
+                    <template if:true={errorMessage}>
+                        <div class="slds-m-top_medium">
+                            <div class="slds-notify slds-notify_alert slds-alert_error">
+                                <span class="slds-assistive-text">Error</span>
+                                <h2>{errorMessage}</h2>
+                            </div>
+                        </div>
+                    </template>
+                </template>
+            </div>
+        </lightning-card>
+    </template>
+    <template if:false={shouldShowCard}>
+        <lightning-card>
+            <div class="slds-text-align_center slds-p-around_large">
+                <lightning-icon icon-name="utility:lock" size="large" class="slds-m-bottom_medium"></lightning-icon>
+                <p class="slds-text-body_regular slds-text-color_weak">You don't have permission to view voicemail in
+                    Salesforce</p>
+            </div>
+        </lightning-card>
+    </template>
+</template>

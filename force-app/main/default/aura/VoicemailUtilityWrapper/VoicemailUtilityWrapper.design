@@ -1,0 +1,8 @@
+<design:component label="Voicemail">
+    <design:attribute name="genesysCloudRegion" label="Genesys Cloud Region"
+        description="The region of your Genesys Cloud org"
+        datasource="mypurecloud.com,usw2.pure.cloud,cac1.pure.cloud,euw2.pure.cloud,mypurecloud.ie,mypurecloud.de,mypurecloud.com.au,apne2.pure.cloud,mypurecloud.jp,mypurecloud.co.uk,use2.us-gov-pure.cloud"
+        default="mypurecloud.com" />
+    <design:attribute name="genesysCloudClientId" label="Genesys Cloud Client ID"
+        description="The OAuth client ID for Genesys Cloud API access" required="true" default="oauth client_id" />
+</design:component>
