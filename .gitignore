@@ -43,3 +43,7 @@ $RECYCLE.BIN/
 **/__pycache__/
 **/.venv/
 **/venv/
+
+
+#Ignore vscode AI rules
+.github\instructions\codacy.instructions.md

@@ -1,0 +1,3 @@
+<aura:documentation>
+	<aura:description>Aura wrapper for Voicemail LWC component to enable Utility Bar API features</aura:description>
+</aura:documentation>
