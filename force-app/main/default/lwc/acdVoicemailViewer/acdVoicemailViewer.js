@@ -45,28 +45,48 @@ export default class AcdVoicemailViewer extends LightningElement {
     
     setupAuthListener() {
         window.addEventListener('message', async (event) => {
-            if (event.origin !== window.location.origin) {
+            if (!this.isValidAuthEvent(event)) {
                 return;
             }
+            
             try {
-                const data = event.data;
-                if (data && data.type === 'GENESYS_AUTH_CALLBACK' && data.code) {
-                    const accessToken = await this.exchangeCodeForToken(data.code);
-                    if (accessToken) {
-                        this.isAuthenticated = true;
-                        if (this.VoiceCall && this.VoiceCall.data && this.CallType === 'Callback') {
-                            this.conversationId = this.parseValueBetweenColons(this.VoiceCall.data.fields.VendorCallKey.value);
-                            setTimeout(() => {
-                                this.handleRetrieveVoicemail();
-                            }, 2000);
-                        }
-                    }
-                }
+                await this.processAuthCallback(event.data);
             } catch (error) {
                 console.error('Error processing auth callback message:', error);
                 this.errorMessage = 'Failed to complete authentication';
             }
         });
+    }
+    
+    isValidAuthEvent(event) {
+        return event.origin === window.location.origin &&
+               event.data &&
+               event.data.type === 'GENESYS_AUTH_CALLBACK' &&
+               event.data.code;
+    }
+    
+    async processAuthCallback(data) {
+        const accessToken = await this.exchangeCodeForToken(data.code);
+        if (!accessToken) {
+            return;
+        }
+        
+        this.isAuthenticated = true;
+        
+        if (this.shouldProcessVoicemail()) {
+            this.processVoicemailAfterAuth();
+        }
+    }
+    
+    shouldProcessVoicemail() {
+        return this.VoiceCall?.data && this.CallType === 'Callback';
+    }
+    
+    processVoicemailAfterAuth() {
+        this.conversationId = this.parseValueBetweenColons(this.VoiceCall.data.fields.VendorCallKey.value);
+        setTimeout(() => {
+            this.handleRetrieveVoicemail();
+        }, 2000);
     }
     
     handleAuthCallback() {
