@@ -1,164 +1,95 @@
 /**
  * VoicemailViewer Lightning Web Component
- * 
- * This component provides a comprehensive voicemail management interface for Genesys Cloud
- * voicemails within Salesforce. It handles authentication, real-time updates via WebSocket,
- * and provides full CRUD operations for voicemail messages.
- * 
- * Key Features:
- * - OAuth authentication with Genesys Cloud
- * - Real-time voicemail notifications via WebSocket
- * - Paginated voicemail list with search capabilities
- * - Audio playback with automatic read status updates
- * - Note editing and voicemail management (mark read/unread, delete)
- * - Utility bar integration with unread count badges
+ * Main component file - imports utility modules for organization
  */
 
 import { LightningElement, track, api, wire } from 'lwc';
 import { getRecord } from 'lightning/uiRecordApi';
 import VendorCallKey from '@salesforce/schema/VoiceCall.VendorCallKey';
 import CallType from '@salesforce/schema/VoiceCall.CallType';
-
-// Optional: Enable permission-based access control
-// import hasMyVoicePermission from '@salesforce/customPermission/Enterprise_VoiceMail_Utility_Access';
+import { generateCodeVerifier, generateCodeChallenge, exchangeCodeForToken, getAccessToken } from './authUtils';
+import { formatDuration, formatDate, getRelativeTime, getCardClass, extractPhoneNumber, parseValueBetweenColons } from './formatUtils';
+import { callGenesysCloudApi, markVoicemailAsRead } from './apiUtils';
+import { setupWebSocket, closeWebSocket } from './websocketUtils';
 
 export default class VoicemailViewer extends LightningElement {
-    // === PUBLIC PROPERTIES ===
-    @api recordId; // Salesforce record ID (if used in record context)
-    @api genesysCloudRegion = 'mypurecloud.com'; // Genesys Cloud region
-    @api genesysCloudClientId; // OAuth client ID for Genesys Cloud
+    @api recordId;
+    @api genesysCloudRegion = 'mypurecloud.com';
+    @api genesysCloudClientId;
 
-    // === COMPONENT STATE ===
-    @track conversationId = ''; // Current conversation ID
-    @track CallType; // Type of call (from Salesforce VoiceCall record)
-    @track audioUrl = null; // Current audio URL for playback
-    @track errorMessage = null; // Error message to display to user
-    @track isLoading = false; // Loading state indicator
-    @track isAuthenticated = false; // Authentication status
-    @track hasVoicemail = false; // Whether any voicemails exist
-
-    // === VOICEMAIL DATA ===
-    @track voicemails = []; // Array of voicemail objects
-    @track loadedAudioUrls = new Map(); // Cache for loaded audio URLs
-    @track lastUpdated = ''; // Timestamp of last data refresh
-
-    // === PAGINATION ===
-    @track currentPage = 1; // Current page number
-    @track pageSize = 25; // Number of items per page
-    @track pageCount = 0; // Total number of pages
-    @track displayCount = 0; // Number of items currently displayed
-
-    // === WEBSOCKET CONNECTION ===
-    @track websocket = null; // WebSocket connection for real-time updates
-    @track channelId = null; // Genesys Cloud notification channel ID
-    @track isWebSocketConnected = false; // WebSocket connection status
-
-    // === COMPUTED PROPERTIES ===
+    @track conversationId = '';
+    @track CallType;
+    @track audioUrl = null;
+    @track errorMessage = null;
+    @track isLoading = false;
+    @track isAuthenticated = false;
+    @track hasVoicemail = false;
+    @track voicemails = [];
+    @track loadedAudioUrls = new Map();
+    @track lastUpdated = '';
+    @track currentPage = 1;
+    @track pageSize = 25;
+    @track pageCount = 0;
+    @track displayCount = 0;
+    @track websocket = null;
+    @track channelId = null;
+    @track isWebSocketConnected = false;
     
-    /**
-     * Determines if the component should be visible
-     * @returns {boolean} Always true (modify for permission-based access)
-     */
     get shouldShowCard() {
         return true;
-        // For permission-based access, uncomment:
-        // return hasMyVoicePermission ? true : false;
     }
 
-    /**
-     * Checks if there are more pages available
-     * @returns {boolean} True if next page exists
-     */
     get hasNextPage() {
         return this.currentPage < this.pageCount;
     }
 
-    /**
-     * Checks if we're on the first page
-     * @returns {boolean} True if on first page
-     */
     get hasPreviousPage() {
         return this.currentPage <= 1;
     }
 
-    /**
-     * Determines if next page button should be disabled
-     * @returns {boolean} True if next button should be disabled
-     */
     get disableNextPage() {
         return !this.hasNextPage;
     }
 
-    /**
-     * Determines if pagination controls should be shown
-     * @returns {boolean} True if more than one page exists
-     */
     get showPagination() {
         return this.pageCount > 1;
     }
 
-    // === LIFECYCLE METHODS ===
-    
-    /**
-     * Wired method to get VoiceCall record data from Salesforce
-     * Automatically loads voicemails if authenticated when call data is received
-     */
+    get unreadCount() {
+        return this.voicemails.filter(vm => !vm.read).length;
+    }
+
     @wire(getRecord, { recordId: '$recordId', fields: [VendorCallKey, CallType] })
     wiredVoiceCall(result) {
         this.VoiceCall = result;
         if (result.data) {
             this.CallType = result.data.fields.CallType.value;
-
             if (this.isAuthenticated) {
-                // Delay to ensure UI is ready
-                setTimeout(() => {
-                    this.loadVoicemails();
-                }, 2000);
+                setTimeout(() => this.loadVoicemails(), 2000);
             }
         }
     }
 
-    /**
-     * Component initialization when inserted into DOM
-     * Sets up authentication, event listeners, and loads initial data
-     */
     connectedCallback() {
-        // Optional permission check
-        // if (!hasMyVoicePermission) return;
-
-        // Check for existing authentication
-        const accessToken = this.getAccessToken();
+        const accessToken = getAccessToken();
         this.isAuthenticated = !!accessToken;
-
-        // Initialize UI state
         this.clearNotificationBadge();
         document.addEventListener('click', this.handleOutsideClick.bind(this));
 
         if (this.isAuthenticated) {
-            // Load data and setup real-time updates
             this.loadVoicemails(true);
             this.setupWebSocketNotifications();
         } else {
-            // Trigger authentication flow
             this.handleLogin();
         }
     }
 
-    /**
-     * Cleanup when component is removed from DOM
-     * Removes event listeners and closes WebSocket connections
-     */
     disconnectedCallback() {
         document.removeEventListener('click', this.handleOutsideClick.bind(this));
-        this.closeWebSocket();
+        closeWebSocket(this.websocket);
+        this.websocket = null;
     }
 
-    // === EVENT HANDLERS ===
-    
-    /**
-     * Handles clicks outside the component to close open menus
-     * @param {Event} event - Click event
-     */
     handleOutsideClick(event) {
         const hasOpenMenu = this.voicemails.some(vm => vm.showMenu);
         if (hasOpenMenu) {
@@ -166,17 +97,9 @@ export default class VoicemailViewer extends LightningElement {
         }
     }
 
-    // === AUTHENTICATION METHODS ===
-    
-    /**
-     * Sets up listener for OAuth callback messages from popup window
-     * Handles the authorization code exchange process
-     */
     setupAuthListener() {
         window.addEventListener('message', async (event) => {
-            if (!this.isValidAuthEvent(event)) {
-                return;
-            }
+            if (!this.isValidAuthEvent(event)) return;
             
             try {
                 await this.processAuthCallback(event.data);
@@ -187,11 +110,6 @@ export default class VoicemailViewer extends LightningElement {
         });
     }
     
-    /**
-     * Validates incoming authentication callback events
-     * @param {MessageEvent} event - Window message event
-     * @returns {boolean} True if valid auth event
-     */
     isValidAuthEvent(event) {
         return event.origin === window.location.origin &&
                event.data &&
@@ -199,24 +117,14 @@ export default class VoicemailViewer extends LightningElement {
                event.data.code;
     }
     
-    /**
-     * Processes the OAuth callback data and exchanges code for token
-     * @param {Object} data - Callback data containing authorization code
-     */
     async processAuthCallback(data) {
-        const accessToken = await this.exchangeCodeForToken(data.code);
-        if (!accessToken) {
-            return;
-        }
+        const accessToken = await exchangeCodeForToken(data.code, this.genesysCloudClientId, this.genesysCloudRegion);
+        if (!accessToken) return;
         
         this.isAuthenticated = true;
         this.initializeAfterAuth();
     }
     
-    /**
-     * Initializes component after successful authentication
-     * Loads voicemails and sets up real-time notifications
-     */
     initializeAfterAuth() {
         setTimeout(() => {
             this.loadVoicemails(true);
@@ -224,45 +132,9 @@ export default class VoicemailViewer extends LightningElement {
         }, 2000);
     }
 
-    /**
-     * Handles OAuth implicit grant callback (legacy method)
-     * Parses access token from URL hash and stores it
-     * @deprecated Use PKCE flow instead of implicit grant
-     */
-    handleAuthCallback() {
-        try {
-            // Parse the URL hash fragment
-            const fragmentParams = new URLSearchParams(window.location.hash.substring(1));
-            const accessToken = fragmentParams.get('access_token');
-            const expiresIn = fragmentParams.get('expires_in');
-
-            if (accessToken) {
-                // Store the token
-                localStorage.setItem('genesyscloud_access_token', accessToken);
-
-                // Calculate and store expiration time
-                const expirationTime = Date.now() + (parseInt(expiresIn, 10) * 1000);
-                localStorage.setItem('genesyscloud_token_expiration', expirationTime.toString());
-
-                this.isAuthenticated = true;
-
-                // Clean up the URL
-                history.replaceState(null, document.title, window.location.pathname + window.location.search);
-            }
-        } catch (error) {
-            console.error('Error handling authentication callback:', error);
-            this.errorMessage = 'Failed to complete authentication';
-        }
-    }
-
-    /**
-     * Initiates OAuth PKCE authentication flow
-     * Opens popup window for Genesys Cloud login
-     * @async
-     */
     async handleLogin() {
-        const codeVerifier = this.generateCodeVerifier();
-        const codeChallenge = await this.generateCodeChallenge(codeVerifier);
+        const codeVerifier = generateCodeVerifier();
+        const codeChallenge = await generateCodeChallenge(codeVerifier);
         
         sessionStorage.setItem('pkce_code_verifier', codeVerifier);
         
@@ -280,12 +152,7 @@ export default class VoicemailViewer extends LightningElement {
         const left = (screen.width / 2) - (width / 2);
         const top = (screen.height / 2) - (height / 2);
 
-        const authWindow = window.open(
-            authUrl,
-            'GenesysCloudAuth',
-            `width=${width},height=${height},left=${left},top=${top}`
-        );
-
+        const authWindow = window.open(authUrl, 'GenesysCloudAuth', `width=${width},height=${height},left=${left},top=${top}`);
         this.setupAuthListener();
 
         if (!authWindow || authWindow.closed || typeof authWindow.closed === 'undefined') {
@@ -293,20 +160,12 @@ export default class VoicemailViewer extends LightningElement {
         }
     }
 
-
-    // === DATA LOADING METHODS ===
-    
-    /**
-     * Loads voicemails from Genesys Cloud API with pagination
-     * @param {boolean} showLoader - Whether to show loading indicator
-     * @async
-     */
     async loadVoicemails(showLoader = true) {
         try {
             this.isLoading = showLoader;
             this.errorMessage = null;
 
-            const accessToken = this.getAccessToken();
+            const accessToken = getAccessToken();
             if (!accessToken) {
                 this.handleLogin();
                 return;
@@ -323,12 +182,7 @@ export default class VoicemailViewer extends LightningElement {
                 ]
             };
 
-            const voicemailsResponse = await this.callGenesysCloudApi(
-                '/api/v2/voicemail/search',
-                'POST',
-                searchBody,
-                accessToken
-            );
+            const voicemailsResponse = await callGenesysCloudApi('/api/v2/voicemail/search', 'POST', searchBody, accessToken, this.genesysCloudRegion);
 
             if (!voicemailsResponse || !voicemailsResponse.results) {
                 this.voicemails = [];
@@ -340,8 +194,6 @@ export default class VoicemailViewer extends LightningElement {
                 return;
             }
 
-
-
             this.voicemails = voicemailsResponse.results
                 .filter(vm => !vm.deleted)
                 .map(vm => {
@@ -349,14 +201,14 @@ export default class VoicemailViewer extends LightningElement {
                     const callerAddress = vm.callerAddress || '';
                     return {
                         ...vm,
-                        formattedDuration: this.formatDuration(vm.audioRecordingDurationSeconds),
-                        formattedDate: this.formatDate(vm.createdDate),
-                        relativeTime: this.getRelativeTime(vm.createdDate),
+                        formattedDuration: formatDuration(vm.audioRecordingDurationSeconds),
+                        formattedDate: formatDate(vm.createdDate),
+                        relativeTime: getRelativeTime(vm.createdDate),
                         isLoading: existing?.isLoading || false,
                         audioUrl: existing?.audioUrl || null,
                         audioElementId: `audio-${vm.id}`,
                         read: vm.read || false,
-                        cardClass: this.getCardClass(vm.read, existing?.isExpanded || false),
+                        cardClass: getCardClass(vm.read, existing?.isExpanded || false),
                         callerClass: vm.read ? 'read-text' : 'unread-text',
                         readMenuLabel: vm.read ? 'Mark as Unread' : 'Mark as Read',
                         note: vm.note || '',
@@ -365,7 +217,7 @@ export default class VoicemailViewer extends LightningElement {
                         originalNote: vm.note || '',
                         showMenu: false,
                         fullCallerAddress: callerAddress.length > 15 ? callerAddress.substring(0, 15) + '...' : callerAddress,
-                        phoneNumber: this.extractPhoneNumber(callerAddress)
+                        phoneNumber: extractPhoneNumber(callerAddress)
                     };
                 });
 
@@ -373,8 +225,6 @@ export default class VoicemailViewer extends LightningElement {
             this.displayCount = this.voicemails.length;
             this.hasVoicemail = this.voicemails.length > 0;
             this.lastUpdated = `Last updated: ${new Date().toLocaleTimeString()}`;
-
-            // Update utility bar with unread count
             this.updateUtilityBar();
         } catch (error) {
             if (error.message && error.message.includes('401')) {
@@ -384,7 +234,6 @@ export default class VoicemailViewer extends LightningElement {
                 this.handleLogin();
                 return;
             }
-
             this.errorMessage = error.message || 'An error occurred while retrieving voicemails';
             console.error('Voicemail retrieval error:', error);
         } finally {
@@ -392,13 +241,6 @@ export default class VoicemailViewer extends LightningElement {
         }
     }
 
-
-
-    // === PAGINATION METHODS ===
-    
-    /**
-     * Navigates to the next page of voicemails
-     */
     handleNextPage() {
         if (this.hasNextPage) {
             this.currentPage++;
@@ -406,9 +248,6 @@ export default class VoicemailViewer extends LightningElement {
         }
     }
 
-    /**
-     * Navigates to the previous page of voicemails
-     */
     handlePreviousPage() {
         if (this.currentPage > 1) {
             this.currentPage--;
@@ -416,140 +255,15 @@ export default class VoicemailViewer extends LightningElement {
         }
     }
 
-    // === TOKEN MANAGEMENT ===
-    
-    /**
-     * Retrieves and validates stored access token
-     * @returns {string|null} Valid access token or null if expired/missing
-     */
-    getAccessToken() {
-        const token = localStorage.getItem('genesyscloud_access_token');
-        const expiration = localStorage.getItem('genesyscloud_token_expiration');
-
-        // Check if token exists and is not expired
-        if (token && expiration) {
-            const now = Date.now();
-            if (now < parseInt(expiration, 10)) {
-                return token;
-            } else {
-                // Token expired, clear it
-                localStorage.removeItem('genesyscloud_access_token');
-                localStorage.removeItem('genesyscloud_token_expiration');
-                this.isAuthenticated = false;
-            }
-        }
-
-        return null;
-    }
-
-    // === API METHODS ===
-    
-    /**
-     * Makes authenticated API calls to Genesys Cloud
-     * @param {string} endpoint - API endpoint path
-     * @param {string} method - HTTP method (GET, POST, PUT, PATCH, DELETE)
-     * @param {Object|null} body - Request body for POST/PUT/PATCH requests
-     * @param {string} accessToken - Bearer token for authentication
-     * @returns {Promise<Object>} API response data
-     * @throws {Error} API error with status and message
-     * @async
-     */
-    async callGenesysCloudApi(endpoint, method, body, accessToken) {
-        try {
-            const url = `https://api.${this.genesysCloudRegion}` + endpoint;
-            const options = {
-                method: method,
-                headers: {
-                    'Authorization': `Bearer ${accessToken}`,
-                    'Content-Type': 'application/json'
-                }
-            };
-
-            if (body && (method === 'POST' || method === 'PUT' || method === 'PATCH')) {
-                options.body = JSON.stringify(body);
-            }
-
-            const response = await fetch(url, options);
-
-            if (!response.ok) {
-                const errorText = await response.text();
-                throw new Error(`API error (${response.status}): ${errorText}`);
-            }
-
-            return await response.json();
-        } catch (error) {
-            console.error('API call error:', error);
-            throw error;
-        }
-    }
-
-    // === FORMATTING METHODS ===
-    
-    /**
-     * Formats duration in seconds to MM:SS format
-     * @param {number} durationSeconds - Duration in seconds
-     * @returns {string} Formatted duration string (e.g., "2:30")
-     */
-    formatDuration(durationSeconds) {
-        if (!durationSeconds) return '0:00';
-
-        const minutes = Math.floor(durationSeconds / 60);
-        const remainingSeconds = durationSeconds % 60;
-
-        return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
-    }
-
-    /**
-     * Formats ISO date string to localized date/time
-     * @param {string} dateString - ISO date string
-     * @returns {string} Localized date/time string
-     */
-    formatDate(dateString) {
-        if (!dateString) return '';
-        return new Date(dateString).toLocaleString();
-    }
-
-    // === VOICEMAIL OPERATIONS ===
-    
-    /**
-     * Marks a voicemail as read in Genesys Cloud
-     * @param {string} voicemailId - Unique voicemail identifier
-     * @async
-     */
-    async markVoicemailAsRead(voicemailId) {
-        try {
-            const accessToken = this.getAccessToken();
-            await this.callGenesysCloudApi(
-                `/api/v2/voicemail/messages/${voicemailId}`,
-                'PUT',
-                { read: true },
-                accessToken
-            );
-        } catch (error) {
-            console.error('Failed to mark voicemail as read:', error);
-        }
-    }
-
-    // === UI EVENT HANDLERS ===
-    
-    /**
-     * Toggles the context menu for a voicemail item
-     * @param {Event} event - Click event from menu button
-     */
     handleMenuToggle(event) {
         event.stopPropagation();
         const voicemailId = event.currentTarget.dataset.id;
-
         this.voicemails = this.voicemails.map(vm => ({
             ...vm,
             showMenu: vm.id === voicemailId ? !vm.showMenu : false
         }));
     }
 
-    /**
-     * Toggles read/unread status of a voicemail
-     * @param {Event} event - Click event from read toggle button
-     */
     handleToggleRead(event) {
         event.stopPropagation();
         const voicemailId = event.currentTarget.dataset.id;
@@ -563,57 +277,37 @@ export default class VoicemailViewer extends LightningElement {
         this.updateVoicemail(voicemailId, { read: newReadStatus });
     }
 
-    /**
-     * Handles voicemail card click to expand/collapse details
-     * @param {Event} event - Click event from voicemail card
-     * @async
-     */
     async handleCardClick(event) {
         event.stopPropagation();
         const voicemailId = event.currentTarget.dataset.id;
         const voicemailIndex = this.voicemails.findIndex(vm => vm.id === voicemailId);
         if (voicemailIndex === -1) return;
 
-        // Close all menus
         this.voicemails = this.voicemails.map(vm => ({ ...vm, showMenu: false }));
-
         this.voicemails[voicemailIndex].isExpanded = !this.voicemails[voicemailIndex].isExpanded;
-        this.voicemails[voicemailIndex].cardClass = this.getCardClass(
+        this.voicemails[voicemailIndex].cardClass = getCardClass(
             this.voicemails[voicemailIndex].read,
             this.voicemails[voicemailIndex].isExpanded
         );
 
-        // Reset editing state and note when collapsing
         if (!this.voicemails[voicemailIndex].isExpanded) {
             this.voicemails[voicemailIndex].isEditing = false;
             this.voicemails[voicemailIndex].note = this.voicemails[voicemailIndex].originalNote;
         } else {
-            // Auto-load audio when expanded
             if (!this.voicemails[voicemailIndex].audioUrl) {
                 await this.loadVoicemailAudio(voicemailId);
             }
         }
-
         this.voicemails = [...this.voicemails];
     }
 
-    /**
-     * Prevents event bubbling for menu clicks
-     * @param {Event} event - Click event
-     */
     handleMenuClick(event) {
         event.stopPropagation();
     }
 
-    /**
-     * Generic event propagation stopper
-     * @param {Event} event - Any DOM event
-     */
     handleStopPropagation(event) {
         event.stopPropagation();
     }
-
-
 
     async handlePlayVoicemail(event) {
         event.stopPropagation();
@@ -634,12 +328,13 @@ export default class VoicemailViewer extends LightningElement {
             this.voicemails[voicemailIndex].isLoading = true;
             this.voicemails = [...this.voicemails];
 
-            const accessToken = this.getAccessToken();
-            const mediaResponse = await this.callGenesysCloudApi(
+            const accessToken = getAccessToken();
+            const mediaResponse = await callGenesysCloudApi(
                 `/api/v2/voicemail/messages/${voicemailId}/media?formatId=WAV`,
                 'GET',
                 null,
-                accessToken
+                accessToken,
+                this.genesysCloudRegion
             );
 
             if (mediaResponse && mediaResponse.mediaFileUri) {
@@ -661,7 +356,6 @@ export default class VoicemailViewer extends LightningElement {
         const voicemailId = event.target.dataset.id || event.detail.value;
         const voicemailIndex = this.voicemails.findIndex(vm => vm.id === voicemailId);
         if (voicemailIndex === -1) return;
-
         this.voicemails[voicemailIndex].isEditing = true;
         this.voicemails = [...this.voicemails];
     }
@@ -670,7 +364,6 @@ export default class VoicemailViewer extends LightningElement {
         const voicemailId = event.target.dataset.id;
         const voicemailIndex = this.voicemails.findIndex(vm => vm.id === voicemailId);
         if (voicemailIndex === -1) return;
-
         this.voicemails[voicemailIndex].note = event.target.value;
     }
 
@@ -679,7 +372,6 @@ export default class VoicemailViewer extends LightningElement {
         const voicemailId = event.target.dataset.id;
         const voicemailIndex = this.voicemails.findIndex(vm => vm.id === voicemailId);
         if (voicemailIndex === -1) return;
-
         const note = this.voicemails[voicemailIndex].note;
         this.updateVoicemail(voicemailId, { note });
         this.voicemails[voicemailIndex].originalNote = note;
@@ -692,7 +384,6 @@ export default class VoicemailViewer extends LightningElement {
         const voicemailId = event.target.dataset.id;
         const voicemailIndex = this.voicemails.findIndex(vm => vm.id === voicemailId);
         if (voicemailIndex === -1) return;
-
         this.voicemails[voicemailIndex].isEditing = false;
         this.voicemails = [...this.voicemails];
     }
@@ -710,7 +401,6 @@ export default class VoicemailViewer extends LightningElement {
         this.displayCount = this.voicemails.length;
         this.updateUtilityBar();
 
-        // If deleted last item on last page and not on first page, go to previous page
         if (isLastPage && isLastItemOnPage && this.currentPage > 1) {
             this.currentPage--;
             this.loadVoicemails(true);
@@ -719,22 +409,20 @@ export default class VoicemailViewer extends LightningElement {
 
     async updateVoicemail(voicemailId, updates) {
         try {
-            const accessToken = this.getAccessToken();
-            await this.callGenesysCloudApi(
+            const accessToken = getAccessToken();
+            await callGenesysCloudApi(
                 `/api/v2/voicemail/messages/${voicemailId}`,
                 'PATCH',
                 updates,
-                accessToken
+                accessToken,
+                this.genesysCloudRegion
             );
 
             const voicemailIndex = this.voicemails.findIndex(vm => vm.id === voicemailId);
             if (voicemailIndex !== -1 && updates.read !== undefined) {
                 this.voicemails[voicemailIndex].read = updates.read;
                 this.voicemails[voicemailIndex].readMenuLabel = updates.read ? 'Mark as Unread' : 'Mark as Read';
-                this.voicemails[voicemailIndex].cardClass = this.getCardClass(
-                    updates.read,
-                    this.voicemails[voicemailIndex].isExpanded
-                );
+                this.voicemails[voicemailIndex].cardClass = getCardClass(updates.read, this.voicemails[voicemailIndex].isExpanded);
                 this.voicemails[voicemailIndex].callerClass = updates.read ? 'read-text' : 'unread-text';
                 this.voicemails = [...this.voicemails];
                 this.updateUtilityBar();
@@ -744,49 +432,10 @@ export default class VoicemailViewer extends LightningElement {
         }
     }
 
-    // === UTILITY METHODS ===
-    
-    /**
-     * Converts a date string to relative time format (e.g., "2 hours ago")
-     * @param {string} dateString - ISO date string
-     * @returns {string} Formatted relative time string
-     */
-    getRelativeTime(dateString) {
-        if (!dateString) return '';
-
-        const diffMs = new Date() - new Date(dateString);
-        const diffMinutes = Math.floor(diffMs / (1000 * 60));
-        const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
-        const diffDays = Math.floor(diffHours / 24);
-        
-        if (diffMinutes < 1) return 'Just now';
-        if (diffHours < 1) return this.formatTimeUnit(diffMinutes, 'minute');
-        if (diffHours < 24) return this.formatTimeUnit(diffHours, 'hour');
-        return this.formatTimeUnit(diffDays, 'day');
-    }
-    
-    /**
-     * Formats a time unit with proper pluralization
-     * @param {number} value - Time value
-     * @param {string} unit - Time unit (minute, hour, day)
-     * @returns {string} Formatted time string
-     */
-    formatTimeUnit(value, unit) {
-        const plural = value > 1 ? 's' : '';
-        return `${value} ${unit}${plural} ago`;
-    }
-
-    /**
-     * Refreshes the voicemail list
-     */
     handleRefresh() {
         this.loadVoicemails(true);
     }
 
-    /**
-     * Handles audio playback completion, marks voicemail as read
-     * @param {Event} event - Audio ended event
-     */
     handleAudioEnded(event) {
         const voicemailId = event.target.dataset.id;
         const voicemail = this.voicemails.find(vm => vm.id === voicemailId);
@@ -795,49 +444,6 @@ export default class VoicemailViewer extends LightningElement {
         }
     }
 
-    /**
-     * Extracts value between first and second colon in a string
-     * @param {string} inputString - Input string with colon separators
-     * @returns {string|null} Extracted value or null if not found
-     */
-    parseValueBetweenColons(inputString) {
-        if (!inputString) return null;
-
-        const firstColonIndex = inputString.indexOf(':');
-        if (firstColonIndex === -1) return null;
-
-        const secondColonIndex = inputString.indexOf(':', firstColonIndex + 1);
-        if (secondColonIndex === -1) return null;
-
-        return inputString.substring(firstColonIndex + 1, secondColonIndex);
-    }
-
-    /**
-     * Generates CSS classes for voicemail cards based on state
-     * @param {boolean} isRead - Whether voicemail is read
-     * @param {boolean} isExpanded - Whether card is expanded
-     * @returns {string} Space-separated CSS class names
-     */
-    getCardClass(isRead, isExpanded) {
-        const baseClass = 'slds-card slds-m-bottom_small';
-        const readClass = isRead ? 'read-card' : 'unread-card';
-        const expandedClass = isExpanded ? 'expanded-card' : '';
-        return `${baseClass} ${readClass} ${expandedClass}`.trim();
-    }
-
-    /**
-     * Calculates number of unread voicemails
-     * @returns {number} Count of unread voicemails
-     */
-    get unreadCount() {
-        return this.voicemails.filter(vm => !vm.read).length;
-    }
-
-    // === UTILITY BAR INTEGRATION ===
-    
-    /**
-     * Updates utility bar badge with current unread count
-     */
     updateUtilityBar() {
         const unread = this.unreadCount;
         this.dispatchEvent(new CustomEvent('voicemailcount', {
@@ -847,9 +453,6 @@ export default class VoicemailViewer extends LightningElement {
         }));
     }
 
-    /**
-     * Clears the utility bar notification badge
-     */
     clearNotificationBadge() {
         this.dispatchEvent(new CustomEvent('voicemailcount', {
             detail: { count: 0 },
@@ -858,67 +461,18 @@ export default class VoicemailViewer extends LightningElement {
         }));
     }
 
-    // === WEBSOCKET REAL-TIME NOTIFICATIONS ===
-    
-    /**
-     * Sets up WebSocket connection for real-time voicemail notifications
-     * Creates notification channel and subscribes to voicemail events
-     * @async
-     */
     async setupWebSocketNotifications() {
-        try {
-            const accessToken = this.getAccessToken();
-            if (!accessToken) {
-                console.log('No access token for WebSocket');
-                return;
-            }
+        const accessToken = getAccessToken();
+        const result = await setupWebSocket(
+            accessToken,
+            this.genesysCloudRegion,
+            (message) => this.handleVoicemailNotification(message),
+            (isConnected) => { this.isWebSocketConnected = isConnected; }
+        );
 
-            console.log('Setting up WebSocket notifications...');
-
-            const userResponse = await this.callGenesysCloudApi('/api/v2/users/me', 'GET', null, accessToken);
-            const userId = userResponse.id;
-
-            const channelResponse = await this.callGenesysCloudApi(
-                '/api/v2/notifications/channels',
-                'POST',
-                {},
-                accessToken
-            );
-
-            this.channelId = channelResponse.id;
-            const wsUri = channelResponse.connectUri;
-
-            const topic = `v2.users.${userId}.voicemail.messages`;
-            console.log('Subscribing to:', topic);
-
-            await this.callGenesysCloudApi(
-                `/api/v2/notifications/channels/${this.channelId}/subscriptions`,
-                'POST',
-                [{ id: topic }],
-                accessToken
-            );
-            console.log('Subscription successful');
-
-            this.websocket = new WebSocket(wsUri);
-
-            this.websocket.onopen = () => {
-                this.isWebSocketConnected = true;
-                console.log('✅ WebSocket connected - Real-time updates active');
-            };
-
-            this.websocket.onmessage = (event) => {
-                console.log('WebSocket message:', event.data);
-                const message = JSON.parse(event.data);
-                if (message.topicName && message.topicName.includes('voicemail.messages')) {
-                    console.log('Voicemail event detected, refreshing...');
-                    this.handleVoicemailNotification(message);
-                }
-            };
-
-            this.websocket.onerror = (error) => {
-                console.error('❌ WebSocket error:', error);
-                this.isWebSocketConnected = false;
-            };
+        if (result) {
+            this.websocket = result.websocket;
+            this.channelId = result.channelId;
 
             this.websocket.onclose = (event) => {
                 console.log('WebSocket closed:', event.code, event.reason);
@@ -930,118 +484,12 @@ export default class VoicemailViewer extends LightningElement {
                     }
                 }, 5000);
             };
-        } catch (error) {
-            console.error('❌ WebSocket setup failed:', error);
         }
     }
 
-    /**
-     * Handles incoming voicemail notification messages
-     * @param {Object} message - WebSocket notification message
-     */
     handleVoicemailNotification(message) {
         setTimeout(() => {
             this.loadVoicemails(false);
         }, 2000);
-    }
-
-    /**
-     * Closes WebSocket connection and cleans up resources
-     */
-    closeWebSocket() {
-        if (this.websocket) {
-            this.websocket.close();
-            this.websocket = null;
-        }
-        this.isWebSocketConnected = false;
-    }
-
-    // === PKCE OAUTH UTILITIES ===
-    
-    /**
-     * Generates cryptographically secure code verifier for PKCE
-     * @returns {string} Base64URL-encoded code verifier
-     */
-    generateCodeVerifier() {
-        const array = new Uint8Array(32);
-        crypto.getRandomValues(array);
-        return btoa(String.fromCharCode.apply(null, array))
-            .replace(/\+/g, '-')
-            .replace(/\//g, '_')
-            .replace(/=/g, '');
-    }
-
-    /**
-     * Generates code challenge from verifier using SHA256
-     * @param {string} verifier - Code verifier string
-     * @returns {Promise<string>} Base64URL-encoded code challenge
-     * @async
-     */
-    async generateCodeChallenge(verifier) {
-        const encoder = new TextEncoder();
-        const data = encoder.encode(verifier);
-        const digest = await crypto.subtle.digest('SHA-256', data);
-        return btoa(String.fromCharCode.apply(null, new Uint8Array(digest)))
-            .replace(/\+/g, '-')
-            .replace(/\//g, '_')
-            .replace(/=/g, '');
-    }
-
-    /**
-     * Exchanges authorization code for access token using PKCE
-     * @param {string} authCode - Authorization code from OAuth callback
-     * @returns {Promise<string|null>} Access token or null on failure
-     * @async
-     */
-    async exchangeCodeForToken(authCode) {
-        try {
-            const codeVerifier = sessionStorage.getItem('pkce_code_verifier');
-            if (!codeVerifier) {
-                throw new Error('Code verifier not found');
-            }
-            
-            const tokenResponse = await fetch(`https://login.${this.genesysCloudRegion}/oauth/token`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/x-www-form-urlencoded'
-                },
-                body: new URLSearchParams({
-                    grant_type: 'authorization_code',
-                    client_id: this.genesysCloudClientId,
-                    code: authCode,
-                    redirect_uri: window.location.origin + '/resource/GenesysAuthCallback',
-                    code_verifier: codeVerifier
-                })
-            });
-            
-            if (!tokenResponse.ok) {
-                throw new Error('Token exchange failed');
-            }
-            
-            const tokenData = await tokenResponse.json();
-            
-            localStorage.setItem('genesyscloud_access_token', tokenData.access_token);
-            const expirationTime = Date.now() + (tokenData.expires_in * 1000);
-            localStorage.setItem('genesyscloud_token_expiration', expirationTime.toString());
-            
-            sessionStorage.removeItem('pkce_code_verifier');
-            
-            return tokenData.access_token;
-        } catch (error) {
-            console.error('Token exchange error:', error);
-            this.errorMessage = 'Failed to exchange authorization code for token';
-            return null;
-        }
-    }
-
-    /**
-     * Extracts phone number from caller address string
-     * @param {string} callerAddress - Raw caller address from voicemail
-     * @returns {string|null} Cleaned phone number or null if not found
-     */
-    extractPhoneNumber(callerAddress) {
-        if (!callerAddress) return null;
-        const match = callerAddress.match(/\+?\d[\d\s\-\(\)]+/);
-        return match ? match[0].replace(/[\s\-\(\)]/g, '') : null;
     }
 }
