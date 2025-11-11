@@ -1,57 +1,108 @@
+/**
+ * VoicemailViewer Lightning Web Component
+ * 
+ * This component provides a comprehensive voicemail management interface for Genesys Cloud
+ * voicemails within Salesforce. It handles authentication, real-time updates via WebSocket,
+ * and provides full CRUD operations for voicemail messages.
+ * 
+ * Key Features:
+ * - OAuth authentication with Genesys Cloud
+ * - Real-time voicemail notifications via WebSocket
+ * - Paginated voicemail list with search capabilities
+ * - Audio playback with automatic read status updates
+ * - Note editing and voicemail management (mark read/unread, delete)
+ * - Utility bar integration with unread count badges
+ */
+
 import { LightningElement, track, api, wire } from 'lwc';
 import { getRecord } from 'lightning/uiRecordApi';
 import VendorCallKey from '@salesforce/schema/VoiceCall.VendorCallKey';
 import CallType from '@salesforce/schema/VoiceCall.CallType';
 
-//  add this if you need to show as utility item and want to control who can see it based on Salesforce permission set, also update shouldShowCard() function. 
+// Optional: Enable permission-based access control
 // import hasMyVoicePermission from '@salesforce/customPermission/Enterprise_VoiceMail_Utility_Access';
 
 export default class VoicemailViewer extends LightningElement {
-    @api recordId;
-    @track conversationId = '';
-    @track CallType;
-    @track audioUrl = null;
-    @track errorMessage = null;
-    @track isLoading = false;
-    @track isAuthenticated = false;
-    @track hasVoicemail = false;
-    @track voicemails = [];
-    @track currentPage = 1;
-    @track pageSize = 25;
-    @track pageCount = 0;
-    @track displayCount = 0;
-    @track loadedAudioUrls = new Map();
-    @track lastUpdated = '';
-    @track websocket = null;
-    @track channelId = null;
-    @track isWebSocketConnected = false;
+    // === PUBLIC PROPERTIES ===
+    @api recordId; // Salesforce record ID (if used in record context)
+    @api genesysCloudRegion = 'mypurecloud.com'; // Genesys Cloud region
+    @api genesysCloudClientId; // OAuth client ID for Genesys Cloud
 
-    // Configurable properties
-    @api genesysCloudRegion = 'mypurecloud.com';
-    @api genesysCloudClientId;
+    // === COMPONENT STATE ===
+    @track conversationId = ''; // Current conversation ID
+    @track CallType; // Type of call (from Salesforce VoiceCall record)
+    @track audioUrl = null; // Current audio URL for playback
+    @track errorMessage = null; // Error message to display to user
+    @track isLoading = false; // Loading state indicator
+    @track isAuthenticated = false; // Authentication status
+    @track hasVoicemail = false; // Whether any voicemails exist
 
+    // === VOICEMAIL DATA ===
+    @track voicemails = []; // Array of voicemail objects
+    @track loadedAudioUrls = new Map(); // Cache for loaded audio URLs
+    @track lastUpdated = ''; // Timestamp of last data refresh
+
+    // === PAGINATION ===
+    @track currentPage = 1; // Current page number
+    @track pageSize = 25; // Number of items per page
+    @track pageCount = 0; // Total number of pages
+    @track displayCount = 0; // Number of items currently displayed
+
+    // === WEBSOCKET CONNECTION ===
+    @track websocket = null; // WebSocket connection for real-time updates
+    @track channelId = null; // Genesys Cloud notification channel ID
+    @track isWebSocketConnected = false; // WebSocket connection status
+
+    // === COMPUTED PROPERTIES ===
+    
+    /**
+     * Determines if the component should be visible
+     * @returns {boolean} Always true (modify for permission-based access)
+     */
     get shouldShowCard() {
-        return true
-        // update this to conditionally show voicemail component based on permission set
+        return true;
+        // For permission-based access, uncomment:
         // return hasMyVoicePermission ? true : false;
     }
 
+    /**
+     * Checks if there are more pages available
+     * @returns {boolean} True if next page exists
+     */
     get hasNextPage() {
         return this.currentPage < this.pageCount;
     }
 
+    /**
+     * Checks if we're on the first page
+     * @returns {boolean} True if on first page
+     */
     get hasPreviousPage() {
         return this.currentPage <= 1;
     }
 
+    /**
+     * Determines if next page button should be disabled
+     * @returns {boolean} True if next button should be disabled
+     */
     get disableNextPage() {
         return !this.hasNextPage;
     }
 
+    /**
+     * Determines if pagination controls should be shown
+     * @returns {boolean} True if more than one page exists
+     */
     get showPagination() {
         return this.pageCount > 1;
     }
 
+    // === LIFECYCLE METHODS ===
+    
+    /**
+     * Wired method to get VoiceCall record data from Salesforce
+     * Automatically loads voicemails if authenticated when call data is received
+     */
     @wire(getRecord, { recordId: '$recordId', fields: [VendorCallKey, CallType] })
     wiredVoiceCall(result) {
         this.VoiceCall = result;
@@ -59,7 +110,7 @@ export default class VoicemailViewer extends LightningElement {
             this.CallType = result.data.fields.CallType.value;
 
             if (this.isAuthenticated) {
-                // Add a two-second pause before retrieving voicemail
+                // Delay to ensure UI is ready
                 setTimeout(() => {
                     this.loadVoicemails();
                 }, 2000);
@@ -67,39 +118,60 @@ export default class VoicemailViewer extends LightningElement {
         }
     }
 
+    /**
+     * Component initialization when inserted into DOM
+     * Sets up authentication, event listeners, and loads initial data
+     */
     connectedCallback() {
-        /*if (!hasMyVoicePermission) {
-            return;
-        }*/
+        // Optional permission check
+        // if (!hasMyVoicePermission) return;
 
+        // Check for existing authentication
         const accessToken = this.getAccessToken();
         this.isAuthenticated = !!accessToken;
 
+        // Initialize UI state
         this.clearNotificationBadge();
         document.addEventListener('click', this.handleOutsideClick.bind(this));
 
         if (this.isAuthenticated) {
+            // Load data and setup real-time updates
             this.loadVoicemails(true);
             this.setupWebSocketNotifications();
         } else {
-            // Auto-login if not authenticated
+            // Trigger authentication flow
             this.handleLogin();
         }
     }
 
+    /**
+     * Cleanup when component is removed from DOM
+     * Removes event listeners and closes WebSocket connections
+     */
     disconnectedCallback() {
         document.removeEventListener('click', this.handleOutsideClick.bind(this));
         this.closeWebSocket();
     }
 
+    // === EVENT HANDLERS ===
+    
+    /**
+     * Handles clicks outside the component to close open menus
+     * @param {Event} event - Click event
+     */
     handleOutsideClick(event) {
-        // Close all menus when clicking outside
         const hasOpenMenu = this.voicemails.some(vm => vm.showMenu);
         if (hasOpenMenu) {
             this.voicemails = this.voicemails.map(vm => ({ ...vm, showMenu: false }));
         }
     }
 
+    // === AUTHENTICATION METHODS ===
+    
+    /**
+     * Sets up listener for OAuth callback messages from popup window
+     * Handles the authorization code exchange process
+     */
     setupAuthListener() {
         window.addEventListener('message', async (event) => {
             if (!this.isValidAuthEvent(event)) {
@@ -115,6 +187,11 @@ export default class VoicemailViewer extends LightningElement {
         });
     }
     
+    /**
+     * Validates incoming authentication callback events
+     * @param {MessageEvent} event - Window message event
+     * @returns {boolean} True if valid auth event
+     */
     isValidAuthEvent(event) {
         return event.origin === window.location.origin &&
                event.data &&
@@ -122,6 +199,10 @@ export default class VoicemailViewer extends LightningElement {
                event.data.code;
     }
     
+    /**
+     * Processes the OAuth callback data and exchanges code for token
+     * @param {Object} data - Callback data containing authorization code
+     */
     async processAuthCallback(data) {
         const accessToken = await this.exchangeCodeForToken(data.code);
         if (!accessToken) {
@@ -132,6 +213,10 @@ export default class VoicemailViewer extends LightningElement {
         this.initializeAfterAuth();
     }
     
+    /**
+     * Initializes component after successful authentication
+     * Loads voicemails and sets up real-time notifications
+     */
     initializeAfterAuth() {
         setTimeout(() => {
             this.loadVoicemails(true);
@@ -574,23 +659,56 @@ export default class VoicemailViewer extends LightningElement {
         }
     }
 
+    // === UTILITY METHODS ===
+    
+    /**
+     * Converts a date string to relative time format (e.g., "2 hours ago")
+     * @param {string} dateString - ISO date string
+     * @returns {string} Formatted relative time string
+     */
     getRelativeTime(dateString) {
         if (!dateString) return '';
 
-        const now = new Date();
-        const date = new Date(dateString);
-        const diffMs = now - date;
+        const diffMs = new Date() - new Date(dateString);
         const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
-        const diffDays = Math.floor(diffHours / 24);
-
+        
         if (diffHours < 1) {
-            const diffMinutes = Math.floor(diffMs / (1000 * 60));
-            return diffMinutes < 1 ? 'Just now' : `${diffMinutes} minute${diffMinutes > 1 ? 's' : ''} ago`;
-        } else if (diffHours < 24) {
-            return `${diffHours} hour${diffHours > 1 ? 's' : ''} ago`;
-        } else {
-            return `${diffDays} day${diffDays > 1 ? 's' : ''} ago`;
+            return this.formatMinutesAgo(diffMs);
         }
+        
+        if (diffHours < 24) {
+            return this.formatHoursAgo(diffHours);
+        }
+        
+        return this.formatDaysAgo(Math.floor(diffHours / 24));
+    }
+    
+    /**
+     * Formats time difference in minutes
+     * @param {number} diffMs - Time difference in milliseconds
+     * @returns {string} Formatted minutes string
+     */
+    formatMinutesAgo(diffMs) {
+        const diffMinutes = Math.floor(diffMs / (1000 * 60));
+        return diffMinutes < 1 ? 'Just now' : `${diffMinutes} minute${diffMinutes > 1 ? 's' : ''} ago`;
+    }
+    
+    /**
+     * Formats time difference in hours
+     * @param {number} diffHours - Time difference in hours
+     * @returns {string} Formatted hours string
+     */
+    formatHoursAgo(diffHours) {
+        return `${diffHours} hour${diffHours > 1 ? 's' : ''} ago`;
+    }
+    
+    /**
+     * Formats time difference in days
+     * @param {number} diffDays - Time difference in days
+     * @returns {string} Formatted days string
+     */
+    formatDaysAgo(diffDays) {
+        return `${diffDays} day${diffDays > 1 ? 's' : ''} ago`;
     }
 
     handleRefresh() {
