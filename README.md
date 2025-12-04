@@ -174,7 +174,7 @@ After deploying the component, you need to configure the regional and OAuth sett
    - **Set the Region**: Configure the appropriate region for your Genesys environment
    - **Add Client ID**: Enter your Genesys OAuth Client ID
 
-#### Step 2: Configure OAuth Implicit Grant
+#### Step 2: Configure OAuth PKCE Grant
 
 **Finding Your Redirect URI:**
 
@@ -195,7 +195,7 @@ After deploying the component, you need to configure the regional and OAuth sett
 
 4. **Configure in Genesys:**
    - In your Genesys environment, navigate to your OAuth client configuration
-   - Under **Implicit Grant** settings, add the complete redirect URI
+   - Under **PKCE Grant** settings, add the complete redirect URI
    - Example: `https://mycompany.lightning.force.com/resource/GenesysAuthCallback`
 
 **Common URI Patterns:**
